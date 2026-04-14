@@ -1,0 +1,70 @@
+pipeline {
+    agent {
+        kubernetes {
+            inheritFrom 'kaniko-builder node python'
+        }
+    }
+
+    environment {
+        FRONTEND_IMAGE = "ghcr.io/dev-epireum-com/dataspace-frontend"
+        BACKEND_IMAGE  = "ghcr.io/dev-epireum-com/dataspace-backend"
+        IMAGE_TAG      = "${GIT_COMMIT[0..7]}"
+    }
+
+    stages {
+        stage('Test & Build') {
+            parallel {
+                stage('Frontend') {
+                    stages {
+                        stage('FE: Install, Lint & Test') {
+                            steps {
+                                container('node') {
+                                    dir('src/frontend') {
+                                        sh 'npm install && npm run lint'
+                                    }
+                                }
+                            }
+                        }
+                        stage('FE: Build & Push') {
+                            steps {
+                                container('kaniko') {
+                                    sh """
+                                        /kaniko/executor \
+                                          --context=dir://src/frontend \
+                                          --dockerfile=src/frontend/Dockerfile \
+                                          --destination=${FRONTEND_IMAGE}:${IMAGE_TAG}
+                                    """
+                                }
+                            }
+                        }
+                    }
+                }
+                stage('Backend') {
+                    stages {
+                        stage('BE: Install, Lint & Test') {
+                            steps {
+                                container('python') {
+                                    dir('src/backend') {
+                                        sh 'pip install -r requirements.txt && ruff check . && python manage.py test'
+                                    }
+                                }
+                            }
+                        }
+                        stage('BE: Build & Push') {
+                            steps {
+                                container('kaniko') {
+                                    sh """
+                                        /kaniko/executor \
+                                          --context=dir://src/backend \
+                                          --dockerfile=src/backend/Dockerfile \
+                                          --destination=${BACKEND_IMAGE}:${IMAGE_TAG}
+                                    """
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
